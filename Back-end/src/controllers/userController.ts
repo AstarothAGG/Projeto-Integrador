@@ -1,36 +1,51 @@
 import { Request, Response } from 'express';
-import db from '../db';
+import { UserModel, User } from '../models/User';
+import bcrypt from 'bcrypt';
+import jwt from 'jsonwebtoken';
 
-export function createUser(req: Request, res: Response): void {
-  const { name, email, password } = req.body;
+const secretKey = 'your-secret-key'; // Substitua por sua chave secreta para geração do token JWT
 
-  const connection = db.openConnection();
+export class UserController {
+  static async registerUser(req: Request, res: Response) {
+    try {
+      const { nickname, email, password } = req.body;
 
-  connection.run(
-    'INSERT INTO users (name, email, password) VALUES (?, ?, ?)',
-    [name, email, password],
-    function (error) {
-      if (error) {
-        console.error('Erro ao criar usuário:', error);
-        res.status(500).json({ message: 'Erro ao criar usuário' });
-      } else {
-        console.log('Novo usuário criado com sucesso. ID:', this.lastID);
-        res.status(201).json({ message: 'Usuário criado com sucesso' });
+      const existingUser = await UserModel.getUserByEmail(email);
+      if (existingUser) {
+        return res.status(400).json({ error: 'E-mail already registered' });
       }
 
-      db.closeConnection(connection);
+      const hashedPassword = await bcrypt.hash(password, 10);
+      const newUser: User = { nickname, email, password: hashedPassword };
+      const createdUser = await UserModel.createUser(newUser);
+
+      res.status(201).json(createdUser);
+    } catch (error) {
+      console.error('Error registering user:', error);
+      res.status(500).json({ error: 'Internal server error' });
     }
-  );
-}
-export function getUserById(arg0: string, getUserById: any) {
-    throw new Error('Function not implemented.');
-}
+  }
 
-export function deleteUser(arg0: string, deleteUser: any) {
-    throw new Error('Function not implemented.');
-}
+  static async login(req: Request, res: Response) {
+    try {
+      const { email, password } = req.body;
 
-export function editUser(arg0: string, editUser: any) {
-    throw new Error('Function not implemented.');
-}
+      const user = await UserModel.getUserByEmail(email);
+      if (!user) {
+        return res.status(401).json({ message: 'Invalid credentials' });
+      }
 
+      const isPasswordValid = await bcrypt.compare(password, user.password);
+      if (!isPasswordValid) {
+        return res.status(401).json({ message: 'Invalid credentials' });
+      }
+
+      const token = jwt.sign({ userId: user.id, email: user.email }, secretKey, { expiresIn: '1h' });
+
+      res.status(200).json({ message: 'Successful login', token });
+    } catch (error) {
+      console.error('Error during login:', error);
+      res.status(500).json({ message: 'Error during login' });
+    }
+  }
+}
